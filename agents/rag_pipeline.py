@@ -2,7 +2,7 @@ import os
 import faiss
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 class CyberThreatRAG:
     """

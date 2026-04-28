@@ -1,9 +1,9 @@
 import json
 import os
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from agents.rag_pipeline import CyberThreatRAG
 from langchain_community.chat_models import ChatOpenAI
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 class AutonomousResponseAgent:
     """

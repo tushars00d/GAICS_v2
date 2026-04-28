@@ -19,3 +19,4 @@ openai
 tiktoken
 jupyter
 ipykernel
+langchain-core
