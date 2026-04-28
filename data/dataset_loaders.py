@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler
 from sklearn.datasets import make_classification
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -20,21 +20,21 @@ class TabularDataset(Dataset):
 def load_dataset(config):
     """
     Loads and preprocesses the dataset specified in the config.
-    Returns DataLoaders for train and test splits.
-    For demonstration and reproducibility, it generates a synthetic 
-    dataset mimicking NSL-KDD properties if raw files are missing.
+    Optimized for large-scale training using pin_memory and multiple workers.
     """
     dataset_name = config.get("data", {}).get("dataset_name", "nsl-kdd")
-    batch_size = config.get("data", {}).get("batch_size", 256)
+    batch_size = config.get("data", {}).get("batch_size", 1024)
+    num_workers = config.get("data", {}).get("num_workers", 2)
+    pin_memory = config.get("data", {}).get("pin_memory", True)
+    mock_samples = config.get("data", {}).get("mock_samples", 100000)
     
-    print(f"Loading dataset: {dataset_name}")
+    print(f"Loading dataset: {dataset_name} (Simulating {mock_samples} samples)")
     
-    # Simulate NSL-KDD tabular data for out-of-the-box execution
-    # In a real scenario, pd.read_csv("data/raw/KDDTrain+.txt") would be here.
+    # Scale up synthetic generation to stress test pipelines
     X, y = make_classification(
-        n_samples=10000,
-        n_features=41, # NSL-KDD has 41 features
-        n_informative=15,
+        n_samples=mock_samples,
+        n_features=41,
+        n_informative=20,
         n_redundant=5,
         n_classes=2,
         weights=[0.8, 0.2], # Imbalanced classes mimicking normal/attack
@@ -52,8 +52,24 @@ def load_dataset(config):
     train_dataset = TabularDataset(X_train, y_train)
     test_dataset = TabularDataset(X_test, y_test)
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    # Optimized DataLoaders
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=(num_workers > 0)
+    )
+    
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=(num_workers > 0)
+    )
     
     print(f"Data loaded: {len(train_dataset)} training samples, {len(test_dataset)} testing samples.")
     return train_loader, test_loader, X_train.shape[1], scaler
