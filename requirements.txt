@@ -20,3 +20,5 @@ tiktoken
 jupyter
 ipykernel
 langchain-core
+pgmpy
+langchain-huggingface

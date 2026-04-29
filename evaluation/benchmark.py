@@ -4,18 +4,55 @@ import numpy as np
 from tqdm import tqdm
 import json
 import os
-import mlflow
+import time
 from models.attention_ids import AttentionIDS, fgsm_attack, purify_data
 from models.tab_ddpm import TabDDPM
 from data.dataset_loaders import load_dataset
 from evaluation.metrics import calculate_macro_f1, calculate_roc_auc, get_detailed_report, plot_confusion_matrix
 
+def measure_latency(model, sample_batch, use_fp16):
+    """
+    Measures the exact millisecond inference latency for a single batch.
+    Crucial for determining 'line-rate' feasibility (e.g. 100k events/sec).
+    """
+    device = sample_batch.device
+    model.eval()
+    
+    # Warmup
+    for _ in range(10):
+        with torch.no_grad():
+            with torch.cuda.amp.autocast(enabled=use_fp16):
+                _ = model(sample_batch)
+                
+    start_event = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() else None
+    end_event = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() else None
+    
+    if torch.cuda.is_available():
+        start_event.record()
+        with torch.no_grad():
+            with torch.cuda.amp.autocast(enabled=use_fp16):
+                _ = model(sample_batch)
+        end_event.record()
+        torch.cuda.synchronize()
+        latency_ms = start_event.elapsed_time(end_event)
+    else:
+        start_time = time.time()
+        with torch.no_grad():
+            with torch.cuda.amp.autocast(enabled=use_fp16):
+                _ = model(sample_batch)
+        latency_ms = (time.time() - start_time) * 1000
+        
+    # Calculate events per second
+    batch_size = sample_batch.shape[0]
+    events_per_sec = (batch_size / latency_ms) * 1000
+    return latency_ms, events_per_sec
+
 def run_ablation_studies(config_path="configs/default.yaml"):
     """
     Runs the ablation study framework over multiple seeds.
     Ablations:
-    1. Clean inference vs FGSM vs Purified
-    Scales to multiple seeds and tracks mean/std robustly.
+    1. Baseline IDS (No DDPM) vs Augmented IDS (With DDPM) - To prove Layer 1 value.
+    2. Clean inference vs FGSM vs Purified - To prove Layer 2 value.
     """
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
@@ -40,11 +77,37 @@ def run_ablation_studies(config_path="configs/default.yaml"):
     t_purify = config.get("layer2_ids", {}).get("purification_steps", 100)
     use_fp16 = config.get("layer2_ids", {}).get("fp16", True) and torch.cuda.is_available()
     
+    # Latency Profiling
+    sample_batch = next(iter(test_loader))[0].to(device)
+    raw_latency_ms, raw_eps = measure_latency(ids_model, sample_batch, use_fp16)
+    
+    # Measure Purification Latency
+    if torch.cuda.is_available():
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        purified_sample = purify_data(ddpm_model, sample_batch, t_purify)
+        end_event.record()
+        torch.cuda.synchronize()
+        purify_latency_ms = start_event.elapsed_time(end_event)
+    else:
+        start_time = time.time()
+        purified_sample = purify_data(ddpm_model, sample_batch, t_purify)
+        purify_latency_ms = (time.time() - start_time) * 1000
+        
+    total_purified_latency = raw_latency_ms + purify_latency_ms
+    purified_eps = (sample_batch.shape[0] / total_purified_latency) * 1000
+
+    print(f"\n--- Latency & Line-Rate Feasibility Analysis ---")
+    print(f"Batch Size: {sample_batch.shape[0]}")
+    print(f"Raw IDS Inference: {raw_latency_ms:.2f} ms | {raw_eps:.2f} events/sec")
+    print(f"DDPM Purification + IDS Inference: {total_purified_latency:.2f} ms | {purified_eps:.2f} events/sec")
+    if purified_eps < 100000:
+        print("[!] WARNING: Purified Pipeline falls below 100k events/sec line-rate requirement. Hardware acceleration or parallel nodes needed.")
+    
     results = {"clean_f1": [], "fgsm_f1": [], "purified_f1": [], "clean_auc": [], "purified_auc": []}
+    print(f"\nRunning Security Ablation Studies over {num_seeds} seeds...")
     
-    print(f"Running Ablation Studies over {num_seeds} seeds...")
-    
-    # For final reporting, keep the predictions of the last seed
     final_targets, final_clean_preds, final_purified_preds = [], [], []
     
     for seed in range(num_seeds):
@@ -97,16 +160,9 @@ def run_ablation_studies(config_path="configs/default.yaml"):
             final_clean_preds = clean_preds
             final_purified_preds = purified_preds
 
-    # Generate and save visual plots for the last seed
     plot_confusion_matrix(final_targets, final_clean_preds, title="Clean Data Confusion Matrix", filename="cm_clean.png")
     plot_confusion_matrix(final_targets, final_purified_preds, title="Purified Data Confusion Matrix", filename="cm_purified.png")
     
-    print("\n" + "="*50)
-    print("FINAL DETAILED REPORT (Clean Data - Last Seed)")
-    print(get_detailed_report(final_targets, final_clean_preds))
-    print("="*50)
-
-    # Calculate Mean and Std
     print("\n--- Ablation Results (Mean ± Std) ---")
     summary = {}
     for key in results:
@@ -114,6 +170,11 @@ def run_ablation_studies(config_path="configs/default.yaml"):
         std_val = np.std(results[key])
         summary[key] = f"{mean_val:.4f} ± {std_val:.4f}"
         print(f"{key}: {summary[key]}")
+        
+    summary["latency"] = {
+        "raw_ms": raw_latency_ms, "raw_eps": raw_eps,
+        "purified_ms": total_purified_latency, "purified_eps": purified_eps
+    }
         
     with open("results_summary.json", "w") as f:
         json.dump(summary, f, indent=4)

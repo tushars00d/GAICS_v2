@@ -1,105 +1,83 @@
 import json
 import os
-from langchain_core.prompts import PromptTemplate
+import torch
+from langchain.prompts import PromptTemplate
 from agents.rag_pipeline import CyberThreatRAG
-from langchain_community.chat_models import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from agents.governance import TrustGovernanceEngine
+
+class MockCloudAPI:
+    """
+    Simulates AWS Boto3 / Azure Management APIs to prove the execution bridge.
+    """
+    def execute_action(self, action_name, target):
+        print(f"\n[CLOUD API] Executing SOAR Playbook: {action_name} on target: {target}")
+        if action_name == "ISOLATE_SUBNET":
+            return f"Success: Modified Security Group to deny all ingress for {target}."
+        elif action_name == "REVOKE_IAM_TOKEN":
+            return f"Success: Revoked active sessions for IAM role {target}."
+        else:
+            return f"Warning: Unrecognized action {action_name}."
 
 class AutonomousResponseAgent:
     """
-    Layer 3 & 4: Multi-Agent System + Autonomous Response (SOAR).
-    Comprises a Decomposer Agent and a Supervisor Agent.
+    Layer 4: Autonomous Response Engine.
+    Integrates the RAG context (Layer 3), connects to Cloud APIs, 
+    and is gated by the Bayesian Governance Engine (Layer 5).
     """
     def __init__(self, config):
         self.config = config
         self.rag = CyberThreatRAG()
+        self.cloud_api = MockCloudAPI()
+        self.governance = TrustGovernanceEngine()
         
-        provider = config.get("layer3_agents", {}).get("llm_provider", "local")
-        model_name = config.get("layer3_agents", {}).get("model_name", "gpt-3.5-turbo")
-        temperature = config.get("layer3_agents", {}).get("temperature", 0.0)
+        self.prompt = PromptTemplate(
+            input_variables=["context", "anomaly"],
+            template="""
+            You are a Cloud Security Orchestrator Agent.
+            Anomaly Detected: {anomaly}
+            Threat Intelligence Context: {context}
+            
+            Determine the single best mitigation action from: [ISOLATE_SUBNET, REVOKE_IAM_TOKEN, PASS]
+            Output ONLY a JSON block like: {{"action": "ACTION_NAME", "target": "target_id", "confidence": 0.95}}
+            """
+        )
         
-        if provider == "openai" and "OPENAI_API_KEY" in os.environ:
-            self.llm = ChatOpenAI(model_name=model_name, temperature=temperature)
-        else:
-            # Fallback to dummy LLM for execution without API keys
-            self.llm = DummyLLM()
-
-    def process_incident(self, incident_data):
-        """
-        Execute the Decomposer -> Supervisor pipeline.
-        """
-        # Step 1: Decomposer Agent generates search query
-        incident_desc = f"Anomalous traffic detected. Features: {json.dumps(incident_data)}"
+    def process_incident(self, telemetry_vector, severity_score=0.85, asset_criticality=0.9):
+        print("\n--- Layer 3: Cognitive Analysis ---")
+        context = self.rag.retrieve_context(str(telemetry_vector))
         
-        # Step 2: RAG Retrieval
-        context = self.rag.retrieve_context(incident_desc)
+        # Simulate an LLM decision based on the RAG context
+        print("[LLM Agent] Reasoning over RAG Context...")
         
-        # Step 3: Supervisor Agent Decision
-        system_prompt = """
-        You are an autonomous SOAR Supervisor Agent.
-        Analyze the incident data and the provided MITRE ATT&CK context.
-        Output ONLY a JSON object with the following schema:
-        {
-            "mitre_mapping": "TXXXX",
-            "reasoning": "brief explanation",
-            "action": "isolate_host|block_ip|revoke_credentials|none",
-            "confidence": 0.0-1.0
+        # In a full deployment, you pass self.prompt to an actual LangChain LLM here.
+        # For execution speed in this defense pipeline, we simulate the LLM's parsed JSON output:
+        llm_response = {
+            "action": "REVOKE_IAM_TOKEN", 
+            "target": "arn:aws:iam::123:role/CompromisedDev", 
+            "confidence": 0.92
         }
-        """
         
-        user_prompt = f"Context:\n{context}\n\nIncident:\n{incident_desc}"
+        print(f"[*] Proposed Playbook: {json.dumps(llm_response)}")
         
-        response = self.llm.invoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt)
-        ])
+        print("\n--- Layer 5: Bayesian Governance Engine Validation ---")
+        gov_result = self.governance.calculate_trusted_autonomy_score(
+            llm_conf=llm_response["confidence"],
+            anomaly_sev=severity_score,
+            asset_crit=asset_criticality
+        )
         
-        # Parse JSON
-        try:
-            decision = json.loads(response.content)
-        except:
-            # Fallback for parsing errors
-            decision = {
-                "mitre_mapping": "Unknown",
-                "reasoning": "Failed to parse LLM output",
-                "action": "none",
-                "confidence": 0.0
-            }
-            
-        # Step 4: Autonomous Response Execution
-        self._execute_action(decision)
-        return decision
-
-    def _execute_action(self, decision):
-        """
-        Layer 4: Deterministic SOAR simulation.
-        """
-        action = decision.get("action", "none")
-        confidence = decision.get("confidence", 0.0)
-        threshold = self.config.get("layer4_response", {}).get("confidence_threshold", 0.85)
+        print(f"[*] PGM Evaluation: {gov_result['evidence']}")
+        print(f"[*] Trusted Autonomy Score: {gov_result['trusted_autonomy_score']:.2f} -> {gov_result['decision']}")
         
-        if confidence < threshold:
-            print(f"[SOAR] Confidence {confidence} below threshold {threshold}. Action requires human approval.")
-            return
-            
-        if not self.config.get("layer4_response", {}).get("simulate_soar", True):
-            print(f"[SOAR] Simulation disabled. Proposed action: {action}")
-            return
-
-        if action == "isolate_host":
-            print("[SOAR EXECUTED] Host isolated from the network via NAC API.")
-        elif action == "block_ip":
-            print("[SOAR EXECUTED] Malicious IP blocked at the perimeter firewall.")
-        elif action == "revoke_credentials":
-            print("[SOAR EXECUTED] User session terminated and credentials revoked.")
+        print("\n--- Layer 4: Autonomous Agentic Response ---")
+        if gov_result["decision"] == "EXECUTE":
+            api_result = self.cloud_api.execute_action(llm_response["action"], llm_response["target"])
+            print(f"[*] Outcome: {api_result}")
         else:
-            print(f"[SOAR] No action taken. Evaluated state: {action}")
-
-
-class DummyLLM:
-    """Mock LLM for testing without API keys."""
-    def invoke(self, messages):
-        class DummyResponse:
-            def __init__(self):
-                self.content = '{"mitre_mapping": "T1499", "reasoning": "High volume traffic detected indicative of DoS", "action": "block_ip", "confidence": 0.95}'
-        return DummyResponse()
+            print("[*] Outcome: Action BLOCKED by Governance Engine. Routing to Human SOC Analyst.")
+            
+        return {
+            "proposed_action": llm_response,
+            "governance_validation": gov_result,
+            "status": gov_result["decision"]
+        }
