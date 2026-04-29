@@ -10,11 +10,18 @@ class TrustGovernanceEngine:
     """
     def __init__(self):
         # Define the structure of the Bayesian Network
-        self.model = models.BayesianNetwork([
-            ('LLM_Confidence', 'Action_Approved'),
-            ('Anomaly_Severity', 'Action_Approved'),
-            ('Asset_Criticality', 'Action_Approved')
-        ])
+        try:
+            self.model = models.DiscreteBayesianNetwork([
+                ('LLM_Confidence', 'Action_Approved'),
+                ('Anomaly_Severity', 'Action_Approved'),
+                ('Asset_Criticality', 'Action_Approved')
+            ])
+        except AttributeError:
+            self.model = models.BayesianNetwork([
+                ('LLM_Confidence', 'Action_Approved'),
+                ('Anomaly_Severity', 'Action_Approved'),
+                ('Asset_Criticality', 'Action_Approved')
+            ])
         
         # Define Conditional Probability Tables (CPTs)
         
