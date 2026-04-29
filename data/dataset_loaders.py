@@ -87,13 +87,17 @@ def load_real_dataset(config):
     
     X = X_df.values
         
-    # If labels are strings, encode them to 0/1 (Normal / Attack)
+    # If labels are strings, encode them to integers first
     if y.dtype == object or y.dtype.name == 'category':
-        le = LabelEncoder()
-        y = le.fit_transform(y)
-        # Map normal to 0, attacks to 1
-        # (This is simplified; real CICIDS has multiple attack classes)
-        y = (y != le.transform(['BENIGN'])[0]).astype(int) if 'BENIGN' in le.classes_ else y
+        # Convert everything to lowercase string for robust matching
+        y_str = np.array([str(val).lower() for val in y])
+        # Map 'benign' or 'normal' to 0, everything else to 1
+        y_binary = np.where(np.char.find(y_str, 'benign') >= 0, 0, 1)
+        y_binary = np.where(np.char.find(y_str, 'normal') >= 0, 0, y_binary)
+        y = y_binary
+    
+    # Enforce strictly binary (0=Benign, 1=Attack) just in case they were already multi-class integers
+    y = (y > 0).astype(int)
         
     # Handle NaNs and Infs (Common in real network data)
     X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)

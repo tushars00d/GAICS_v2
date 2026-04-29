@@ -25,7 +25,7 @@ def measure_latency(model, sample_batch, use_fp16):
     # Warmup
     for _ in range(10):
         with torch.no_grad():
-            with torch.cuda.amp.autocast(enabled=use_fp16):
+            with torch.amp.autocast('cuda', enabled=use_fp16):
                 _ = model(sample_batch)
                 
     start_event = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() else None
@@ -34,7 +34,7 @@ def measure_latency(model, sample_batch, use_fp16):
     if torch.cuda.is_available():
         start_event.record()
         with torch.no_grad():
-            with torch.cuda.amp.autocast(enabled=use_fp16):
+            with torch.amp.autocast('cuda', enabled=use_fp16):
                 _ = model(sample_batch)
         end_event.record()
         torch.cuda.synchronize()
@@ -42,7 +42,7 @@ def measure_latency(model, sample_batch, use_fp16):
     else:
         start_time = time.time()
         with torch.no_grad():
-            with torch.cuda.amp.autocast(enabled=use_fp16):
+            with torch.amp.autocast('cuda', enabled=use_fp16):
                 _ = model(sample_batch)
         latency_ms = (time.time() - start_time) * 1000
         
@@ -126,7 +126,7 @@ def run_ablation_studies(config_path="configs/default.yaml"):
             
             # 1. Clean
             with torch.no_grad():
-                with torch.cuda.amp.autocast(enabled=use_fp16):
+                with torch.amp.autocast('cuda', enabled=use_fp16):
                     out_clean = ids_model(batch_x)
                     probs_c = torch.sigmoid(out_clean.squeeze(-1))
                     preds_c = probs_c > 0.5
@@ -134,14 +134,14 @@ def run_ablation_studies(config_path="configs/default.yaml"):
             # 2. FGSM Attack
             x_adv = fgsm_attack(ids_model, batch_x, batch_y, epsilon)
             with torch.no_grad():
-                with torch.cuda.amp.autocast(enabled=use_fp16):
+                with torch.amp.autocast('cuda', enabled=use_fp16):
                     out_adv = ids_model(x_adv)
                     preds_a = torch.sigmoid(out_adv.squeeze(-1)) > 0.5
                 
             # 3. Purified
             x_purified = purify_data(ddpm_model, x_adv, t_purify)
             with torch.no_grad():
-                with torch.cuda.amp.autocast(enabled=use_fp16):
+                with torch.amp.autocast('cuda', enabled=use_fp16):
                     out_pur = ids_model(x_purified)
                     probs_p = torch.sigmoid(out_pur.squeeze(-1))
                     preds_p = probs_p > 0.5
