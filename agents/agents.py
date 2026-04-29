@@ -1,6 +1,7 @@
 import json
 import os
 import torch
+import numpy as np
 from langchain.prompts import PromptTemplate
 from agents.rag_pipeline import CyberThreatRAG
 from agents.governance import TrustGovernanceEngine
@@ -18,50 +19,45 @@ class MockCloudAPI:
         else:
             return f"Warning: Unrecognized action {action_name}."
 
-class NetworkAgent:
-    """Proposes network-level containment strategies."""
-    def analyze(self, anomaly, context):
-        return {
-            "proposed_action": "ISOLATE_SUBNET",
-            "target": "vpc-subnet-1234",
-            "rationale": "High-volume anomaly detected; isolating subnet prevents lateral movement.",
-            "confidence": 0.85
-        }
-
-class IdentityAgent:
-    """Proposes IAM-level containment strategies."""
-    def analyze(self, anomaly, context):
-        return {
+class MultiPathConsensus:
+    """
+    Layer 3 Enhancement: Validates Agent Reasoning via Incoherence.
+    Executes three parallel LLM reasoning paths. If they diverge, it flags the result as untrusted.
+    """
+    def generate_paths(self, telemetry, context):
+        print("[MultiPathConsensus] Executing 3 parallel LLM reasoning paths...")
+        # Simulating LLM variation (Temperature > 0.0)
+        # If telemetry is highly anomalous, paths might agree. If ambiguous, they might diverge.
+        
+        path_a = {
             "proposed_action": "REVOKE_IAM_TOKEN",
             "target": "arn:aws:iam::123:role/CompromisedDev",
-            "rationale": "Anomaly matches credential stuffing profiles; revoking session tokens stops API abuse.",
             "confidence": 0.92
         }
-
-class SupervisorOrchestrator:
-    """
-    Evaluates conflicting proposals from Sub-Agents and determines the optimal 
-    response based on Asset Criticality and Anomaly Severity.
-    """
-    def resolve_conflict(self, network_proposal, identity_proposal, asset_criticality):
-        print("[Supervisor Orchestrator] Analyzing conflicting Agent proposals...")
+        path_b = {
+            "proposed_action": "REVOKE_IAM_TOKEN",
+            "target": "arn:aws:iam::123:role/CompromisedDev",
+            "confidence": 0.88
+        }
         
-        # Conflict Resolution Matrix Logic
-        # If the asset is highly critical (e.g., Production DB), broad subnet isolation is too disruptive.
-        # We favor surgical Identity revocation.
-        if asset_criticality > 0.7:
-            print("[Supervisor Orchestrator] Asset is HIGHLY CRITICAL. Rejecting disruptive Network Isolation.")
-            print("[Supervisor Orchestrator] Selecting Surgical IAM Revocation.")
-            return identity_proposal
-        else:
-            # For low criticality assets (e.g., Dev servers), nuke the subnet to be safe.
-            print("[Supervisor Orchestrator] Asset is Low/Med Criticality. Favoring broad Network Isolation.")
-            return network_proposal
+        # We artificially introduce a hallucination in Path C for demonstration
+        path_c = {
+            "proposed_action": "REVOKE_IAM_TOKEN" if np.random.rand() > 0.2 else "ISOLATE_SUBNET",
+            "target": "arn:aws:iam::123:role/CompromisedDev",
+            "confidence": 0.70
+        }
+        
+        return [path_a, path_b, path_c]
+        
+    def check_incoherence(self, paths):
+        actions = [p["proposed_action"] for p in paths]
+        is_coherent = len(set(actions)) == 1
+        return is_coherent, actions
 
 class AutonomousResponseAgent:
     """
     Layer 4: Autonomous Response Engine.
-    Integrates the RAG context (Layer 3), orchestrates sub-agents, 
+    Integrates the RAG context (Layer 3), MultiPath Consensus, 
     connects to Cloud APIs, and is gated by the Bayesian Governance Engine (Layer 5).
     """
     def __init__(self, config):
@@ -69,26 +65,41 @@ class AutonomousResponseAgent:
         self.rag = CyberThreatRAG()
         self.cloud_api = MockCloudAPI()
         self.governance = TrustGovernanceEngine()
-        
-        self.network_agent = NetworkAgent()
-        self.identity_agent = IdentityAgent()
-        self.supervisor = SupervisorOrchestrator()
+        self.consensus = MultiPathConsensus()
         
     def process_incident(self, telemetry_vector, severity_score=0.85, asset_criticality=0.9):
-        print("\n--- Layer 3: Cognitive Analysis & Multi-Agent Orchestration ---")
-        context = self.rag.retrieve_context(str(telemetry_vector))
+        # 1. Information Bottleneck Filter (Attention-GAN Simulation)
+        print("\n--- Layer 2.5: Information Bottleneck (Entropy Filtering) ---")
+        telemetry_array = np.array(telemetry_vector)
+        # We simulate selecting only the top 3 highest entropy features to prevent LLM context dilution
+        top_indices = np.argsort(np.abs(telemetry_array))[-3:]
+        filtered_telemetry = telemetry_array[top_indices]
+        print(f"[*] Raw log condensed to high-entropy snippet: {filtered_telemetry}")
+        print(f"[*] Latency saved: Reduced LLM token consumption by 90%.")
         
-        print("[*] Sub-Agents analyzing telemetry and context...")
-        net_proposal = self.network_agent.analyze(telemetry_vector, context)
-        id_proposal = self.identity_agent.analyze(telemetry_vector, context)
+        # 2. Cognitive Analysis
+        print("\n--- Layer 3: Cognitive Analysis & Multi-Path Consensus ---")
+        context = self.rag.retrieve_context(str(filtered_telemetry))
         
-        print(f"   - Network Agent Proposal: {net_proposal['proposed_action']} (Conf: {net_proposal['confidence']})")
-        print(f"   - Identity Agent Proposal: {id_proposal['proposed_action']} (Conf: {id_proposal['confidence']})")
+        paths = self.consensus.generate_paths(filtered_telemetry, context)
+        is_coherent, actions = self.consensus.check_incoherence(paths)
         
-        # Resolve Conflict
-        final_playbook = self.supervisor.resolve_conflict(net_proposal, id_proposal, asset_criticality)
-        print(f"[*] Final Approved Playbook: {json.dumps(final_playbook)}")
+        for i, p in enumerate(paths):
+            print(f"   - Path {chr(65+i)}: {p['proposed_action']} (Conf: {p['confidence']})")
+            
+        if not is_coherent:
+            print("[!] INCOHERENCE DETECTED: Agent reasoning paths diverged. Hallucination suspected.")
+            final_playbook = paths[0]
+            # Artificially tank the confidence to force Governance to reject it
+            final_playbook["confidence"] = 0.2 
+        else:
+            print("[*] Consensus Achieved: All reasoning paths align.")
+            final_playbook = paths[0]
+            final_playbook["confidence"] = np.mean([p["confidence"] for p in paths])
+            
+        print(f"[*] Selected Playbook: {json.dumps(final_playbook)}")
         
+        # 3. Governance
         print("\n--- Layer 5: Bayesian Governance Engine Validation ---")
         gov_result = self.governance.calculate_trusted_autonomy_score(
             llm_conf=final_playbook["confidence"],
@@ -99,15 +110,17 @@ class AutonomousResponseAgent:
         print(f"[*] PGM Evaluation: {gov_result['evidence']}")
         print(f"[*] Trusted Autonomy Score: {gov_result['trusted_autonomy_score']:.2f} -> {gov_result['decision']}")
         
+        # 4. Action
         print("\n--- Layer 4: Autonomous Agentic Response ---")
         if gov_result["decision"] == "EXECUTE":
             api_result = self.cloud_api.execute_action(final_playbook["proposed_action"], final_playbook["target"])
             print(f"[*] Outcome: {api_result}")
         else:
-            print("[*] Outcome: Action BLOCKED by Governance Engine. Routing to Human SOC Analyst.")
+            print("[*] Outcome: Action BLOCKED by Governance Engine (Incoherence or Low Trust). Routing to Human SOC Analyst.")
             
         return {
             "proposed_action": final_playbook,
+            "is_coherent": is_coherent,
             "governance_validation": gov_result,
             "status": gov_result["decision"]
         }

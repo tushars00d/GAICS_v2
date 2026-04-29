@@ -22,3 +22,4 @@ ipykernel
 langchain-core
 pgmpy
 langchain-huggingface
+imbalanced-learn

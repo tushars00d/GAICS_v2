@@ -5,7 +5,7 @@ from tqdm import tqdm
 import os
 import yaml
 from models.tab_ddpm import TabDDPM
-from data.dataset_loaders import load_dataset
+from data.dataset_loaders import load_minority_dataset
 import mlflow
 
 def train_ddpm(config_path="configs/default.yaml"):
@@ -14,8 +14,8 @@ def train_ddpm(config_path="configs/default.yaml"):
         
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Load Data
-    train_loader, _, input_dim, _ = load_dataset(config)
+    # Load ONLY Minority Data to prevent Minority Class Collapse
+    train_loader, input_dim, _ = load_minority_dataset(config)
     
     # Init Model
     model = TabDDPM(input_dim, config).to(device)

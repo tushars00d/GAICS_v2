@@ -122,5 +122,41 @@ def load_real_dataset(config):
     print(f"Data ingested: {len(train_dataset)} training, {len(test_dataset)} testing | Features: {X_train.shape[1]}")
     return train_loader, test_loader, X_train.shape[1], scaler
 
+def load_minority_dataset(config):
+    """
+    Specifically isolates the minority attack class (Label == 1) for Per-Class Diffusion training.
+    This prevents 'Minority Class Collapse' where the DDPM just learns the average benign traffic.
+    """
+    # Load the full data arrays first
+    train_loader, test_loader, input_dim, scaler = load_real_dataset(config)
+    
+    # Extract only the attack samples from the training set
+    minority_X = []
+    minority_y = []
+    
+    for batch_x, batch_y in train_loader.dataset:
+        if batch_y.item() == 1:
+            minority_X.append(batch_x.numpy())
+            minority_y.append(batch_y.item())
+            
+    minority_X = np.array(minority_X)
+    minority_y = np.array(minority_y)
+    
+    print(f"[*] Per-Class Diffusion: Isolated {len(minority_y)} minority attack samples for targeted training.")
+    
+    minority_dataset = TabularDataset(minority_X, minority_y)
+    
+    batch_size = config.get("data", {}).get("batch_size", 1024)
+    # If minority is very small, we might need a smaller batch size, but PyTorch handles it.
+    actual_batch_size = min(batch_size, len(minority_y) if len(minority_y) > 0 else batch_size)
+    
+    minority_loader = DataLoader(
+        minority_dataset, batch_size=actual_batch_size, shuffle=True, 
+        num_workers=config.get("data", {}).get("num_workers", 2), 
+        pin_memory=config.get("data", {}).get("pin_memory", True)
+    )
+    
+    return minority_loader, input_dim, scaler
+
 # We replace the old load_dataset to load_real_dataset for backward compatibility during refactor
 load_dataset = load_real_dataset
