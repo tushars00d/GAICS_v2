@@ -69,10 +69,13 @@ graph TD
 
 ### Dataset Preparation
 
-By default, the `data/dataset_loaders.py` script automatically fetches a subset of NSL-KDD for quick demonstration. To use the full NSL-KDD or CICIDS-2017 datasets:
-1. Download the datasets from their official sources.
-2. Place the CSV files in `data/raw/` (e.g., `data/raw/KDDTrain+.txt`).
-3. The loaders will automatically parse and preprocess continuous/categorical features.
+### Dataset Preparation
+
+This architecture strictly requires **Direct CSV Ingestion** of real cloud telemetry to prevent synthetic circular validation.
+
+1. Download a subset of the **CIC-IDS-2018** dataset (e.g., `02-14-2018.csv` for SSH Bruteforce).
+2. Place the file exactly at: `data/cicids_subset.csv`.
+3. The loaders will automatically parse, drop non-numeric metadata, and preprocess the features.
 
 ## Execution
 

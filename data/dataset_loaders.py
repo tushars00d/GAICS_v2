@@ -60,27 +60,9 @@ def load_real_dataset(config):
     num_workers = config.get("data", {}).get("num_workers", 2)
     pin_memory = config.get("data", {}).get("pin_memory", True)
     
-    try:
-        csv_path = download_and_extract_cicids("data")
-        print(f"[*] Ingesting REAL dataset from {csv_path}...")
-        df = pd.read_csv(csv_path)
-    except FileNotFoundError as e:
-        print(e)
-        # --- FALLBACK FOR CONTINUOUS INTEGRATION / NOTEBOOK EXECUTION ONLY ---
-        # To ensure the pipeline code can still be executed and tested by you right now, 
-        # we will generate a temporary DataFrame that exactly mimics the CIC-IDS-2018 schema (78 features).
-        # YOU MUST REPLACE THIS BEFORE YOUR DEFENSE.
-        print("\n[WARNING] Falling back to a highly-noised 78-feature schema mimic so the pipeline runs.")
-        print("[WARNING] DO NOT show these specific F1-score results in your final dissertation.\n")
-        
-        np.random.seed(42)
-        num_samples = config.get("data", {}).get("mock_samples", 50000)
-        # Mimic 78 features of CIC-IDS-2018
-        X_mock = np.random.randn(num_samples, 78) * np.random.rand(78) * 100 # Add non-linear noise
-        y_mock = np.random.choice([0, 1], size=num_samples, p=[0.85, 0.15]) # 15% attack rate
-        
-        df = pd.DataFrame(X_mock, columns=[f"F_{i}" for i in range(78)])
-        df['Label'] = y_mock
+    csv_path = download_and_extract_cicids("data")
+    print(f"[*] Ingesting REAL dataset from {csv_path}...")
+    df = pd.read_csv(csv_path)
     
     # Clean up column names (CIC-IDS usually has leading/trailing spaces)
     df.columns = df.columns.str.strip()
