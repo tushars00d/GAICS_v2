@@ -82,14 +82,28 @@ def load_real_dataset(config):
         df = pd.DataFrame(X_mock, columns=[f"F_{i}" for i in range(78)])
         df['Label'] = y_mock
     
-    # Preprocessing
+    # Clean up column names (CIC-IDS usually has leading/trailing spaces)
+    df.columns = df.columns.str.strip()
+
     # Separate features and labels
     if 'Label' in df.columns:
         y = df['Label'].values
-        X = df.drop(columns=['Label']).values
+        X_df = df.drop(columns=['Label'])
     else:
         y = df.iloc[:, -1].values # Assume last column is label
-        X = df.iloc[:, :-1].values
+        X_df = df.iloc[:, :-1]
+        
+    # Drop known metadata columns if they exist (common in CIC-IDS)
+    metadata_cols = ['Flow ID', 'Src IP', 'Dst IP', 'Timestamp']
+    X_df = X_df.drop(columns=[col for col in metadata_cols if col in X_df.columns])
+    
+    # Convert all remaining to numeric, coercing any weird strings/dates to NaN
+    X_df = X_df.apply(pd.to_numeric, errors='coerce')
+    
+    # Drop columns that are entirely NaN (e.g., text columns we missed)
+    X_df = X_df.dropna(axis=1, how='all')
+    
+    X = X_df.values
         
     # If labels are strings, encode them to 0/1 (Normal / Attack)
     if y.dtype == object or y.dtype.name == 'category':
