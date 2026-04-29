@@ -103,9 +103,15 @@ def load_real_dataset(config):
     X_scaled = scaler.fit_transform(X)
     
     # Split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_scaled, y, test_size=0.2, random_state=42, stratify=y
-    )
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_scaled, y, test_size=0.2, random_state=42, stratify=y
+        )
+    except ValueError:
+        print("[!] Warning: Extreme minority class detected (<2 samples). Falling back to non-stratified split.")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_scaled, y, test_size=0.2, random_state=42
+        )
     
     train_dataset = TabularDataset(X_train, y_train)
     test_dataset = TabularDataset(X_test, y_test)
