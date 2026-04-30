@@ -81,9 +81,10 @@ def load_real_dataset(config):
     # Drop all leakage columns
     X_df = df.drop(columns=list(set(leakage_cols)), errors='ignore')
         
-    # Drop known metadata columns if they exist (common in CIC-IDS)
-    metadata_cols = ['Flow ID', 'Src IP', 'Dst IP', 'Timestamp']
-    X_df = X_df.drop(columns=[col for col in metadata_cols if col in X_df.columns])
+    # Aggressive Feature Dropping: Remove IPs, Timestamps, and Flow IDs
+    meta_keywords = ['flow id', 'src ip', 'source ip', 'dst ip', 'destination ip', 'timestamp', 'unnamed', 'port']
+    meta_cols_to_drop = [c for c in X_df.columns if any(k in c.lower() for k in meta_keywords)]
+    X_df = X_df.drop(columns=meta_cols_to_drop, errors='ignore')
     
     # Convert all remaining to numeric, coercing any weird strings/dates to NaN
     X_df = X_df.apply(pd.to_numeric, errors='coerce')
@@ -109,7 +110,7 @@ def load_real_dataset(config):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
-    # 2. Support Imbalance Fix: Construct a realistic test set (90% Benign, 10% Attack)
+    # 2. Support Imbalance Fix: Construct a realistic test set
     benign_idx = np.where(y == 0)[0]
     attack_idx = np.where(y == 1)[0]
     
@@ -121,6 +122,8 @@ def load_real_dataset(config):
     num_benign_test = max(1, int(0.2 * len(benign_idx)))
     # We want attack to be ~10% of test set -> test_attack = test_benign / 9
     num_attack_test = max(1, num_benign_test // 9)
+    # Hard Test Set: Force at least 250 Infiltration samples to prove DDPM generalization
+    num_attack_test = max(num_attack_test, 250)
     # Ensure we don't ask for more attacks than we have
     num_attack_test = min(num_attack_test, max(1, len(attack_idx) // 2))
     

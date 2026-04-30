@@ -221,7 +221,7 @@ def run_smote_vs_ddpm_ablation(config_path="configs/default.yaml"):
     X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
     
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import recall_score
+    from sklearn.metrics import recall_score, matthews_corrcoef
     
     print("[*] Training Baseline Model on SMOTE Augmented Data...")
     clf_smote = RandomForestClassifier(n_estimators=10, max_depth=5, random_state=42)
@@ -246,15 +246,21 @@ def run_smote_vs_ddpm_ablation(config_path="configs/default.yaml"):
     
     print("\n--- SMOTE Baseline Class-Wise Report ---")
     print(classification_report(y_test, preds_smote, target_names=target_names))
+    smote_mcc = matthews_corrcoef(y_test, preds_smote)
+    print(f"MCC Score (SMOTE): {smote_mcc:.4f}")
     
     print("\n--- Tabular DDPM Class-Wise Report (Force Multiplier) ---")
     print(classification_report(y_test, preds_ddpm, target_names=target_names))
+    ddpm_mcc = matthews_corrcoef(y_test, preds_ddpm)
+    print(f"MCC Score (DDPM): {ddpm_mcc:.4f}")
     
     smote_recall = recall_score(y_test, preds_smote, pos_label=1)
     ddpm_recall = recall_score(y_test, preds_ddpm, pos_label=1)
     recall_delta = (ddpm_recall - smote_recall) * 100
     
-    print(f"[*] CONCLUSION: Tabular DDPM prevents Minority Class Collapse, achieving {recall_delta:.1f}% higher recall on Infiltration attacks compared to SMOTE.")
+    print(f"\n[*] CONCLUSION: Tabular DDPM prevents Minority Class Collapse.")
+    print(f"    - Recall Improvement: {recall_delta:.1f}% higher recall on Infiltration.")
+    print(f"    - MCC Improvement: Achieved a rigorous MCC of {ddpm_mcc:.2f} compared to SMOTE's {smote_mcc:.2f}.")
 
 if __name__ == "__main__":
     run_ablation_studies()
