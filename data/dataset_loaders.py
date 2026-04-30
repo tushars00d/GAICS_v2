@@ -67,13 +67,19 @@ def load_real_dataset(config):
     # Clean up column names (CIC-IDS usually has leading/trailing spaces)
     df.columns = df.columns.str.strip()
 
-    # Separate features and labels
+    # 1. Data Leakage Fix: Explicitly remove highly correlated "answer keys"
+    leakage_keywords = ['label', 'attack', 'category', 'sub_cat']
+    leakage_cols = [c for c in df.columns if any(k in c.lower() for k in leakage_keywords)]
+    
+    # Extract labels before dropping
     if 'Label' in df.columns:
-        y = df['Label'].values
-        X_df = df.drop(columns=['Label'])
+        y_raw = df['Label'].values
     else:
-        y = df.iloc[:, -1].values # Assume last column is label
-        X_df = df.iloc[:, :-1]
+        y_raw = df.iloc[:, -1].values # Assume last column is label if not named
+        leakage_cols.append(df.columns[-1])
+        
+    # Drop all leakage columns
+    X_df = df.drop(columns=list(set(leakage_cols)), errors='ignore')
         
     # Drop known metadata columns if they exist (common in CIC-IDS)
     metadata_cols = ['Flow ID', 'Src IP', 'Dst IP', 'Timestamp']
@@ -87,35 +93,51 @@ def load_real_dataset(config):
     
     X = X_df.values
         
-    # If labels are strings, encode them to integers first
-    if y.dtype == object or y.dtype.name == 'category':
-        # Convert everything to lowercase string for robust matching
-        y_str = np.array([str(val).lower() for val in y])
-        # Map 'benign' or 'normal' to 0, everything else to 1
+    # Process Labels
+    if y_raw.dtype == object or y_raw.dtype.name == 'category':
+        y_str = np.array([str(val).lower() for val in y_raw])
         y_binary = np.where(np.char.find(y_str, 'benign') >= 0, 0, 1)
         y_binary = np.where(np.char.find(y_str, 'normal') >= 0, 0, y_binary)
         y = y_binary
-    
-    # Enforce strictly binary (0=Benign, 1=Attack) just in case they were already multi-class integers
-    y = (y > 0).astype(int)
+    else:
+        y = (y_raw > 0).astype(int)
         
-    # Handle NaNs and Infs (Common in real network data)
+    # Handle NaNs and Infs
     X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
     
     # Scale Features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
-    # Split
-    try:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled, y, test_size=0.2, random_state=42, stratify=y
-        )
-    except ValueError:
-        print("[!] Warning: Extreme minority class detected (<2 samples). Falling back to non-stratified split.")
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled, y, test_size=0.2, random_state=42
-        )
+    # 2. Support Imbalance Fix: Construct a realistic test set (90% Benign, 10% Attack)
+    benign_idx = np.where(y == 0)[0]
+    attack_idx = np.where(y == 1)[0]
+    
+    np.random.seed(42)
+    np.random.shuffle(benign_idx)
+    np.random.shuffle(attack_idx)
+    
+    # We put 20% of benign samples in test
+    num_benign_test = max(1, int(0.2 * len(benign_idx)))
+    # We want attack to be ~10% of test set -> test_attack = test_benign / 9
+    num_attack_test = max(1, num_benign_test // 9)
+    # Ensure we don't ask for more attacks than we have
+    num_attack_test = min(num_attack_test, max(1, len(attack_idx) // 2))
+    
+    test_benign_idx = benign_idx[:num_benign_test]
+    train_benign_idx = benign_idx[num_benign_test:]
+    
+    test_attack_idx = attack_idx[:num_attack_test]
+    train_attack_idx = attack_idx[num_attack_test:]
+    
+    test_idx = np.concatenate([test_benign_idx, test_attack_idx])
+    train_idx = np.concatenate([train_benign_idx, train_attack_idx])
+    
+    np.random.shuffle(test_idx)
+    np.random.shuffle(train_idx)
+    
+    X_train, X_test = X_scaled[train_idx], X_scaled[test_idx]
+    y_train, y_test = y[train_idx], y[test_idx]
     
     train_dataset = TabularDataset(X_train, y_train)
     test_dataset = TabularDataset(X_test, y_test)
