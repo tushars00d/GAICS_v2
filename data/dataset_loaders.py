@@ -81,8 +81,12 @@ def load_real_dataset(config):
     # Drop all leakage columns
     X_df = df.drop(columns=list(set(leakage_cols)), errors='ignore')
         
-    # Aggressive Feature Dropping: Remove IPs, Timestamps, and Flow IDs
-    meta_keywords = ['flow id', 'src ip', 'source ip', 'dst ip', 'destination ip', 'timestamp', 'unnamed', 'port']
+    # Aggressive Feature Dropping: "Zero-Leakage" Protocol
+    meta_keywords = [
+        'flow id', 'src ip', 'source ip', 'dst ip', 'destination ip', 
+        'timestamp', 'unnamed', 'port', 'protocol', 'fwd header length',
+        'min_seg_size_forward', 'init_win_bytes_forward', 'init_win_bytes_backward'
+    ]
     meta_cols_to_drop = [c for c in X_df.columns if any(k in c.lower() for k in meta_keywords)]
     X_df = X_df.drop(columns=meta_cols_to_drop, errors='ignore')
     
